@@ -1,0 +1,2094 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Project 108 — Command Authentication & Replay Protection</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Cairo:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #040810;
+  --surface: #080f1e;
+  --surface2: #0d1829;
+  --green: #00ff88;
+  --green-dim: #00cc6a;
+  --green-glow: rgba(0,255,136,0.15);
+  --red: #ff3b5c;
+  --red-dim: #cc2040;
+  --amber: #ffb400;
+  --blue: #4488ff;
+  --blue-dim: #2255cc;
+  --cyan: #00d4ff;
+  --text: #e8f0ff;
+  --text-dim: #7890b0;
+  --border: rgba(0,255,136,0.2);
+  --mono: 'Space Mono', monospace;
+  --sans: 'Cairo', sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  overflow-x: hidden;
+  cursor: none;
+}
+
+/* Custom cursor */
+.cursor {
+  position: fixed;
+  width: 12px; height: 12px;
+  background: var(--green);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 9999;
+  transform: translate(-50%,-50%);
+  transition: transform 0.1s, width 0.2s, height 0.2s, background 0.2s;
+  box-shadow: 0 0 20px var(--green);
+}
+.cursor-ring {
+  position: fixed;
+  width: 36px; height: 36px;
+  border: 1px solid rgba(0,255,136,0.5);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 9998;
+  transform: translate(-50%,-50%);
+  transition: transform 0.15s ease-out, width 0.3s, height 0.3s;
+}
+.cursor.hover { width: 20px; height: 20px; background: var(--cyan); }
+.cursor-ring.hover { width: 56px; height: 56px; border-color: var(--cyan); }
+
+/* Noise overlay */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 1000;
+  opacity: 0.4;
+}
+
+/* Grid lines */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(0,255,136,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,255,136,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ============ HERO ============ */
+.hero {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 40px 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+.hero-glow {
+  position: absolute;
+  width: 600px; height: 600px;
+  background: radial-gradient(circle, rgba(0,255,136,0.08) 0%, transparent 70%);
+  top: 50%; left: 50%;
+  transform: translate(-50%,-50%);
+  animation: pulse 4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes pulse {
+  0%,100% { transform: translate(-50%,-50%) scale(1); opacity: 0.8; }
+  50% { transform: translate(-50%,-50%) scale(1.15); opacity: 1; }
+}
+
+.badge {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 3px;
+  color: var(--green);
+  border: 1px solid var(--border);
+  padding: 6px 16px;
+  border-radius: 2px;
+  margin-bottom: 32px;
+  text-transform: uppercase;
+  animation: fadeDown 0.8s ease both;
+}
+
+.hero h1 {
+  font-size: clamp(36px, 7vw, 88px);
+  font-weight: 900;
+  line-height: 1.0;
+  letter-spacing: -2px;
+  animation: fadeDown 0.8s 0.1s ease both;
+}
+
+.hero h1 span.green { color: var(--green); text-shadow: 0 0 40px rgba(0,255,136,0.5); }
+.hero h1 span.dim { color: var(--text-dim); }
+
+.hero-sub {
+  font-size: clamp(14px, 2vw, 18px);
+  color: var(--text-dim);
+  margin-top: 20px;
+  max-width: 580px;
+  line-height: 1.7;
+  animation: fadeDown 0.8s 0.2s ease both;
+}
+
+.hero-tags {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 30px;
+  animation: fadeDown 0.8s 0.3s ease both;
+}
+
+.tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 4px 10px;
+  border-radius: 2px;
+  letter-spacing: 1px;
+}
+.tag.green { background: rgba(0,255,136,0.1); color: var(--green); border: 1px solid rgba(0,255,136,0.3); }
+.tag.red { background: rgba(255,59,92,0.1); color: var(--red); border: 1px solid rgba(255,59,92,0.3); }
+.tag.blue { background: rgba(68,136,255,0.1); color: var(--blue); border: 1px solid rgba(68,136,255,0.3); }
+.tag.amber { background: rgba(255,180,0,0.1); color: var(--amber); border: 1px solid rgba(255,180,0,0.3); }
+
+.scroll-hint {
+  position: absolute;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--text-dim);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  animation: fadeDown 0.8s 0.5s ease both;
+}
+.scroll-arrow {
+  width: 1px;
+  height: 40px;
+  background: linear-gradient(to bottom, var(--green), transparent);
+  animation: scrollPulse 2s ease-in-out infinite;
+}
+@keyframes scrollPulse {
+  0%,100% { opacity: 0.3; transform: scaleY(0.8); }
+  50% { opacity: 1; transform: scaleY(1); }
+}
+
+@keyframes fadeDown {
+  from { opacity: 0; transform: translateY(-20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ============ SECTION BASE ============ */
+section {
+  position: relative;
+  padding: 100px 20px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.section-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 4px;
+  color: var(--green);
+  text-transform: uppercase;
+  margin-bottom: 16px;
+  opacity: 0;
+  transform: translateX(-20px);
+  transition: opacity 0.6s, transform 0.6s;
+}
+
+.section-label.visible { opacity: 1; transform: none; }
+
+.section-title {
+  font-size: clamp(28px, 5vw, 52px);
+  font-weight: 900;
+  line-height: 1.1;
+  margin-bottom: 16px;
+  opacity: 0;
+  transform: translateY(30px);
+  transition: opacity 0.7s 0.1s, transform 0.7s 0.1s;
+}
+
+.section-title.visible { opacity: 1; transform: none; }
+
+.section-desc {
+  font-size: 16px;
+  color: var(--text-dim);
+  line-height: 1.8;
+  max-width: 680px;
+  margin-bottom: 60px;
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.7s 0.2s, transform 0.7s 0.2s;
+}
+.section-desc.visible { opacity: 1; transform: none; }
+
+/* ============ DIVIDER ============ */
+.divider {
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--border), transparent);
+  margin: 0;
+}
+
+/* ============ CONCEPTS CARDS ============ */
+.concepts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.concept-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 32px;
+  position: relative;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(40px);
+  transition: opacity 0.6s, transform 0.6s, border-color 0.3s, box-shadow 0.3s;
+}
+
+.concept-card.visible { opacity: 1; transform: none; }
+
+.concept-card:hover {
+  border-color: var(--green);
+  box-shadow: 0 0 40px rgba(0,255,136,0.08);
+}
+
+.concept-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--green);
+}
+.concept-card.red-card::before { background: var(--red); }
+.concept-card.blue-card::before { background: var(--blue); }
+.concept-card.amber-card::before { background: var(--amber); }
+
+.concept-num {
+  font-family: var(--mono);
+  font-size: 48px;
+  font-weight: 700;
+  color: rgba(0,255,136,0.08);
+  position: absolute;
+  top: 16px;
+  left: 24px;
+  line-height: 1;
+}
+.concept-card.red-card .concept-num { color: rgba(255,59,92,0.08); }
+.concept-card.blue-card .concept-num { color: rgba(68,136,255,0.08); }
+.concept-card.amber-card .concept-num { color: rgba(255,180,0,0.08); }
+
+.concept-icon {
+  font-size: 32px;
+  margin-bottom: 16px;
+}
+
+.concept-card h3 {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  color: var(--green);
+}
+.concept-card.red-card h3 { color: var(--red); }
+.concept-card.blue-card h3 { color: var(--blue); }
+.concept-card.amber-card h3 { color: var(--amber); }
+
+.concept-card p {
+  font-size: 14px;
+  color: var(--text-dim);
+  line-height: 1.8;
+}
+
+/* ============ PROTOCOL FLOW ============ */
+.protocol-flow {
+  position: relative;
+}
+
+.flow-step {
+  display: grid;
+  grid-template-columns: 60px 1fr;
+  gap: 24px;
+  margin-bottom: 8px;
+  opacity: 0;
+  transform: translateX(-30px);
+  transition: opacity 0.6s, transform 0.6s;
+}
+.flow-step.visible { opacity: 1; transform: none; }
+
+.flow-num {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+.flow-circle {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  border: 2px solid var(--green);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--green);
+  background: rgba(0,255,136,0.05);
+  flex-shrink: 0;
+}
+.flow-circle.red { border-color: var(--red); color: var(--red); background: rgba(255,59,92,0.05); }
+
+.flow-line {
+  flex: 1;
+  width: 2px;
+  background: linear-gradient(to bottom, var(--border), transparent);
+  margin: 4px auto 0;
+  min-height: 30px;
+}
+
+.flow-content {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 20px 24px;
+  margin-bottom: 8px;
+}
+
+.flow-content h4 {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.flow-content p {
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.7;
+}
+
+.flow-packet {
+  margin-top: 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--bg);
+  border: 1px solid rgba(0,255,136,0.15);
+  border-radius: 4px;
+  padding: 12px 16px;
+  line-height: 1.9;
+  overflow-x: auto;
+}
+
+.pk-green { color: var(--green); }
+.pk-amber { color: var(--amber); }
+.pk-blue { color: var(--blue); }
+.pk-red { color: var(--red); }
+.pk-dim { color: var(--text-dim); }
+
+/* ============ SIMULATOR ============ */
+.simulator {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.sim-header {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sim-dot { width: 10px; height: 10px; border-radius: 50%; }
+.sim-dot.red { background: #ff5f57; }
+.sim-dot.amber { background: #febc2e; }
+.sim-dot.green { background: #28c840; }
+
+.sim-title {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-right: auto;
+}
+
+.sim-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  min-height: 460px;
+}
+
+@media (max-width: 700px) {
+  .sim-body { grid-template-columns: 1fr; }
+}
+
+.sim-panel {
+  padding: 24px;
+  border-left: 1px solid var(--border);
+}
+.sim-panel:first-child { border-left: none; }
+
+.sim-panel-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 3px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sim-panel-title::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.attack-btn {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 4px;
+  border: 1px solid;
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: none;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: all 0.2s;
+  background: transparent;
+}
+
+.attack-btn:hover { transform: translateX(-4px); }
+
+.attack-btn.btn-green {
+  border-color: var(--green);
+  color: var(--green);
+}
+.attack-btn.btn-green:hover { background: rgba(0,255,136,0.08); box-shadow: 0 0 20px rgba(0,255,136,0.1); }
+
+.attack-btn.btn-red {
+  border-color: var(--red);
+  color: var(--red);
+}
+.attack-btn.btn-red:hover { background: rgba(255,59,92,0.08); box-shadow: 0 0 20px rgba(255,59,92,0.1); }
+
+.attack-btn.btn-amber {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+.attack-btn.btn-amber:hover { background: rgba(255,180,0,0.08); box-shadow: 0 0 20px rgba(255,180,0,0.1); }
+
+.attack-btn.btn-blue {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+.attack-btn.btn-blue:hover { background: rgba(68,136,255,0.08); box-shadow: 0 0 20px rgba(68,136,255,0.1); }
+
+.btn-icon { font-size: 18px; }
+
+.sim-log {
+  background: var(--bg);
+  border-radius: 4px;
+  border: 1px solid rgba(0,255,136,0.1);
+  height: 380px;
+  overflow-y: auto;
+  padding: 16px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.9;
+  scroll-behavior: smooth;
+}
+
+.log-line {
+  display: flex;
+  gap: 10px;
+  animation: logFadeIn 0.3s ease;
+  margin-bottom: 2px;
+}
+
+@keyframes logFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.log-time { color: var(--text-dim); flex-shrink: 0; }
+.log-ok { color: var(--green); }
+.log-err { color: var(--red); }
+.log-warn { color: var(--amber); }
+.log-info { color: var(--blue); }
+.log-dim { color: var(--text-dim); }
+
+/* LED display */
+.led-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  gap: 12px;
+}
+
+.led-bulb {
+  width: 60px; height: 60px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #333, #111);
+  border: 3px solid #333;
+  transition: all 0.4s ease;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+
+.led-bulb.on {
+  background: radial-gradient(circle at 35% 35%, #aaff44, #00ff88);
+  border-color: var(--green);
+  box-shadow: 0 0 30px var(--green), 0 0 60px rgba(0,255,136,0.4);
+}
+
+.led-bulb.rejected {
+  background: radial-gradient(circle at 35% 35%, #ff6644, #ff2244);
+  border-color: var(--red);
+  box-shadow: 0 0 30px var(--red), 0 0 60px rgba(255,59,92,0.4);
+  animation: blink 0.3s ease 3;
+}
+
+@keyframes blink {
+  0%,100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.led-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: var(--text-dim);
+}
+
+.led-status {
+  font-size: 13px;
+  font-weight: 600;
+  transition: color 0.3s;
+}
+
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(3,1fr);
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.stat-box {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 12px 8px;
+  text-align: center;
+}
+
+.stat-num {
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 700;
+}
+.stat-num.green { color: var(--green); }
+.stat-num.red { color: var(--red); }
+.stat-num.amber { color: var(--amber); }
+
+.stat-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+/* Packet animation */
+.packet-anim {
+  position: relative;
+  height: 40px;
+  margin: 16px 0;
+  overflow: hidden;
+}
+
+.packet-dot {
+  position: absolute;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  top: 50%;
+  transform: translateY(-50%);
+  transition: none;
+}
+
+/* ============ WIRING SECTION ============ */
+.wiring-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+@media (max-width: 700px) {
+  .wiring-grid { grid-template-columns: 1fr; }
+}
+
+.wiring-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(30px);
+  transition: opacity 0.6s, transform 0.6s;
+}
+.wiring-card.visible { opacity: 1; transform: none; }
+
+.wiring-card-header {
+  background: var(--bg);
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: var(--green);
+  text-transform: uppercase;
+}
+
+.pin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.pin-table tr {
+  border-bottom: 1px solid rgba(0,255,136,0.05);
+  transition: background 0.2s;
+}
+
+.pin-table tr:hover { background: rgba(0,255,136,0.03); }
+
+.pin-table td {
+  padding: 10px 20px;
+  vertical-align: middle;
+}
+
+.pin-table .pin-num {
+  color: var(--amber);
+  font-weight: 700;
+  width: 80px;
+}
+
+.pin-table .pin-name { color: var(--text); }
+.pin-table .pin-target { color: var(--text-dim); }
+
+.pin-arrow {
+  color: var(--green);
+  font-size: 16px;
+}
+
+/* ============ CODE SECTION ============ */
+.code-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.code-tab {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 1px;
+  padding: 12px 20px;
+  cursor: none;
+  color: var(--text-dim);
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+  background: none;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+}
+
+.code-tab.active {
+  color: var(--green);
+  border-bottom-color: var(--green);
+}
+
+.code-tab:hover:not(.active) { color: var(--text); }
+
+.code-content {
+  display: none;
+}
+.code-content.active { display: block; }
+
+pre {
+  background: var(--bg);
+  padding: 24px;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.9;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+pre::-webkit-scrollbar { width: 4px; height: 4px; }
+pre::-webkit-scrollbar-track { background: transparent; }
+pre::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.kw { color: var(--blue); }
+.fn { color: var(--green); }
+.str { color: var(--amber); }
+.cm { color: var(--text-dim); font-style: italic; }
+.num { color: #ff9988; }
+.type { color: var(--cyan); }
+.var { color: var(--text); }
+
+/* ============ ATTACKS TABLE ============ */
+.attack-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  opacity: 0;
+  transform: translateY(30px);
+  transition: opacity 0.6s, transform 0.6s;
+}
+.attack-matrix.visible { opacity: 1; transform: none; }
+
+.attack-matrix thead tr {
+  background: var(--bg);
+}
+
+.attack-matrix th {
+  padding: 14px 20px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+}
+
+.attack-matrix td {
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(0,255,136,0.05);
+  vertical-align: middle;
+}
+
+.attack-matrix tr:hover td { background: rgba(0,255,136,0.02); }
+
+.pill {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.pill.accepted { background: rgba(0,255,136,0.1); color: var(--green); border: 1px solid rgba(0,255,136,0.3); }
+.pill.rejected { background: rgba(255,59,92,0.1); color: var(--red); border: 1px solid rgba(255,59,92,0.3); }
+
+/* ============ WIRESHARK SECTION ============ */
+.wireshark-sim {
+  background: #1e1e2e;
+  border-radius: 4px;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 12px;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+.ws-toolbar {
+  background: #2a2a3e;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.ws-toolbar-title {
+  font-size: 11px;
+  color: rgba(255,255,255,0.5);
+  letter-spacing: 1px;
+}
+
+.ws-filter {
+  background: #111120;
+  border: 1px solid rgba(0,255,136,0.3);
+  border-radius: 3px;
+  padding: 4px 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--green);
+  flex: 1;
+}
+
+.ws-packets {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.ws-packet-row {
+  display: grid;
+  grid-template-columns: 50px 120px 120px 60px 60px 1fr;
+  gap: 0;
+  padding: 5px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  cursor: none;
+  transition: background 0.15s;
+  font-size: 11px;
+}
+
+.ws-packet-row:hover { background: rgba(255,255,255,0.06); }
+.ws-packet-row.selected { background: #3344aa; }
+.ws-packet-row.ok { border-left: 2px solid var(--green); }
+.ws-packet-row.err { border-left: 2px solid var(--red); }
+.ws-packet-row.warn { border-left: 2px solid var(--amber); }
+
+.ws-col { padding: 0 6px; }
+.ws-col.num { color: rgba(255,255,255,0.4); }
+.ws-col.time { color: rgba(255,255,255,0.5); }
+.ws-col.src { color: #88aaff; }
+.ws-col.dst { color: #ffaa44; }
+.ws-col.proto { color: #44ddaa; }
+.ws-col.len { color: rgba(255,255,255,0.4); }
+.ws-col.info { color: rgba(255,255,255,0.8); }
+.ws-col.info.ok { color: #88ff88; }
+.ws-col.info.err { color: #ff6666; }
+
+.ws-detail {
+  background: #16162a;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  padding: 12px 16px;
+  font-size: 11px;
+  line-height: 1.8;
+  color: rgba(255,255,255,0.6);
+  min-height: 120px;
+}
+
+.ws-field { color: #88ccff; }
+.ws-val { color: #ffcc44; }
+.ws-ok { color: #88ff88; }
+.ws-err { color: #ff6666; }
+
+/* ============ FOOTER ============ */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 40px 20px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+}
+
+footer span.green { color: var(--green); }
+
+/* ============ NETWORK ANIMATION ============ */
+.network-vis {
+  position: relative;
+  height: 140px;
+  margin: 30px 0;
+  overflow: hidden;
+}
+
+.node-pc, .node-arduino {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.node-pc { left: 60px; }
+.node-arduino { right: 60px; }
+
+.node-box {
+  padding: 10px 18px;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid;
+}
+
+.node-box.pc { border-color: var(--blue); color: var(--blue); background: rgba(68,136,255,0.08); }
+.node-box.arduino { border-color: var(--amber); color: var(--amber); background: rgba(255,180,0,0.08); }
+
+.node-label { font-size: 10px; color: var(--text-dim); font-family: var(--mono); letter-spacing: 1px; }
+
+.network-line {
+  position: absolute;
+  top: 50%;
+  left: 160px;
+  right: 160px;
+  height: 1px;
+  background: linear-gradient(to right, var(--blue), var(--amber));
+  transform: translateY(-50%);
+  opacity: 0.3;
+}
+
+.flying-packet {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 4px 10px;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ============ SCROLLBAR ============ */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ============ PROGRESS BAR ============ */
+.progress-bar {
+  position: fixed;
+  top: 0; left: 0;
+  height: 2px;
+  background: linear-gradient(to right, var(--green), var(--cyan));
+  z-index: 9000;
+  width: 0%;
+  transition: width 0.1s;
+  box-shadow: 0 0 10px var(--green);
+}
+
+/* nav */
+.nav {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  background: rgba(8,15,30,0.9);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  padding: 6px;
+  z-index: 500;
+  backdrop-filter: blur(20px);
+}
+
+.nav a {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: 6px 14px;
+  border-radius: 100px;
+  text-decoration: none;
+  color: var(--text-dim);
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.nav a:hover, .nav a.active {
+  background: rgba(0,255,136,0.1);
+  color: var(--green);
+}
+
+@media (max-width: 600px) {
+  .nav { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- Progress bar -->
+<div class="progress-bar" id="progress"></div>
+
+<!-- Custom cursor -->
+<div class="cursor" id="cursor"></div>
+<div class="cursor-ring" id="cursor-ring"></div>
+
+<!-- Navigation -->
+<nav class="nav">
+  <a href="#hero" class="active">الرئيسية</a>
+  <a href="#concepts">المفاهيم</a>
+  <a href="#flow">البروتوكول</a>
+  <a href="#simulator">المحاكاة</a>
+  <a href="#wiring">التوصيل</a>
+  <a href="#code">الكود</a>
+  <a href="#wireshark">Wireshark</a>
+</nav>
+
+<!-- ============ HERO ============ -->
+<section id="hero" style="max-width:100%; padding:0;">
+  <div class="hero">
+    <div class="hero-glow"></div>
+    <div class="badge">PROJECT 108 // CSC2204 // COMPUTER NETWORKS</div>
+    <h1>
+      <span class="dim">Command</span><br>
+      <span class="green">Authentication</span><br>
+      <span class="dim">+ Replay Protection</span>
+    </h1>
+    <p class="hero-sub">
+      بناء بروتوكول أمني متكامل على Arduino باستخدام HMAC + Sequence Numbers + Nonce لمنع 3 أنواع من الهجمات
+    </p>
+    <div class="hero-tags">
+      <span class="tag green">HMAC Authentication</span>
+      <span class="tag blue">Sequence Numbers</span>
+      <span class="tag amber">Nonce Freshness</span>
+      <span class="tag red">Replay Protection</span>
+    </div>
+    <div class="scroll-hint">
+      <span>SCROLL</span>
+      <div class="scroll-arrow"></div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ============ CONCEPTS ============ -->
+<section id="concepts">
+  <p class="section-label">المفاهيم الأساسية</p>
+  <h2 class="section-title">3 طبقات حماية</h2>
+  <p class="section-desc">
+    الأمان الحقيقي مش طبقة واحدة. كل طبقة بتحل مشكلة مختلفة، وبعض الطبقات مع بعض بيعملوا درعاً كاملاً ضد الهجمات.
+  </p>
+  <div class="concepts-grid">
+    <div class="concept-card" data-delay="0">
+      <span class="concept-num">01</span>
+      <div class="concept-icon">🔐</div>
+      <h3>HMAC Authentication</h3>
+      <p>
+        الـ PC والـ Arduino عندهم مفتاح سري مشترك. كل أمر بتبعته بتضيفله "بصمة رقمية" محسوبة من المفتاح ده. لو حد بعت أمر من غير المفتاح الصح، الـ HMAC مش هيتطابق والأمر بيتّرفض.
+      </p>
+      <div class="flow-packet" style="margin-top:16px; font-size:11px;">
+        <span class="pk-dim">message: </span><span class="pk-green">LED_ON|5|839201</span><br>
+        <span class="pk-dim">HMAC:    </span><span class="pk-amber">A3F9B2C1</span> <span class="pk-dim">← بصمة المفتاح</span>
+      </div>
+    </div>
+
+    <div class="concept-card blue-card" data-delay="100">
+      <span class="concept-num">02</span>
+      <div class="concept-icon">🔢</div>
+      <h3>Sequence Numbers</h3>
+      <p>
+        كل أمر بياخد رقم تسلسلي متزايد (1، 2، 3...). الـ Arduino بيحتفظ بآخر رقم وصله. لو جاه رقم أصغر أو مساوي، معناه إن الأمر قديم أو متكرر فبيتّرفض.
+      </p>
+      <div class="flow-packet" style="margin-top:16px; font-size:11px;">
+        <span class="pk-dim">lastSeq = </span><span class="pk-amber">5</span><br>
+        <span class="pk-dim">incoming = </span><span class="pk-red">3</span> <span class="pk-red">← REJECTED (old)</span><br>
+        <span class="pk-dim">incoming = </span><span class="pk-green">6</span> <span class="pk-green">← ACCEPTED</span>
+      </div>
+    </div>
+
+    <div class="concept-card amber-card" data-delay="200">
+      <span class="concept-num">03</span>
+      <div class="concept-icon">🎲</div>
+      <h3>Nonce Freshness Window</h3>
+      <p>
+        كل أمر بيتضاف ليه رقم عشوائي فريد (nonce). الـ Arduino بيحتفظ بقائمة آخر 20 nonce شافها. لو نفس الـ nonce جه تاني مرة، حتى لو الـ HMAC صح، الأمر بيتّرفض كـ Replay Attack.
+      </p>
+      <div class="flow-packet" style="margin-top:16px; font-size:11px;">
+        <span class="pk-dim">nonce cache: </span><span class="pk-amber">[839201, 445522, ...]</span><br>
+        <span class="pk-dim">incoming:    </span><span class="pk-red">839201</span> <span class="pk-red">← REPLAY!</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ============ PROTOCOL FLOW ============ -->
+<section id="flow">
+  <p class="section-label">تدفق البروتوكول</p>
+  <h2 class="section-title">خطوة بخطوة</h2>
+  <p class="section-desc">كيف يتم بناء الأمر، إرساله، وتحقق الـ Arduino منه بالتفصيل.</p>
+
+  <!-- Network visualization -->
+  <div class="network-vis" id="netVis">
+    <div class="node-pc">
+      <div class="node-box pc">PC</div>
+      <div class="node-label">Python Client</div>
+    </div>
+    <div class="network-line"></div>
+    <div class="node-arduino">
+      <div class="node-box arduino">Arduino</div>
+      <div class="node-label">W5500 Ethernet</div>
+    </div>
+    <div class="flying-packet" id="flyingPacket"></div>
+  </div>
+
+  <div class="protocol-flow">
+
+    <div class="flow-step" data-delay="0">
+      <div class="flow-num">
+        <div class="flow-circle">1</div>
+        <div class="flow-line"></div>
+      </div>
+      <div>
+        <div class="flow-content">
+          <h4>🖥️ PC يبني الحزمة</h4>
+          <p>الـ Python يحدد الأمر (LED_ON)، يزيد رقم الـ Sequence، يولد Nonce عشوائي، ثم يحسب HMAC من المفتاح السري.</p>
+          <div class="flow-packet">
+<span class="pk-dim">cmd   = </span><span class="pk-green">"LED_ON"</span><br>
+<span class="pk-dim">seq   = </span><span class="pk-amber">6</span>  <span class="pk-dim">← تزيد كل مرة</span><br>
+<span class="pk-dim">nonce = </span><span class="pk-blue">839201</span>  <span class="pk-dim">← عشوائي</span><br>
+<span class="pk-dim">msg   = </span><span class="pk-green">"LED_ON|6|839201"</span><br>
+<span class="pk-dim">hmac  = </span><span class="pk-amber">HMAC(msg, "MySecretKey123") = </span><span class="pk-amber">A3F9B2C1</span><br>
+<span class="pk-dim">packet= </span><span class="pk-green">LED_ON</span><span class="pk-dim">|</span><span class="pk-amber">6</span><span class="pk-dim">|</span><span class="pk-blue">839201</span><span class="pk-dim">|</span><span class="pk-amber">A3F9B2C1</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-step" data-delay="100">
+      <div class="flow-num">
+        <div class="flow-circle">2</div>
+        <div class="flow-line"></div>
+      </div>
+      <div>
+        <div class="flow-content">
+          <h4>📡 الإرسال عبر UDP</h4>
+          <p>الحزمة بتتبعت عبر UDP إلى IP الـ Arduino على البورت 8888. UDP مش محتاج connection، الـ Arduino بيسمع ويرد.</p>
+          <div class="flow-packet">
+<span class="pk-dim">socket.sendto(packet, (</span><span class="pk-green">"192.168.1.177"</span><span class="pk-dim">, </span><span class="pk-amber">8888</span><span class="pk-dim">))</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-step" data-delay="200">
+      <div class="flow-num">
+        <div class="flow-circle">3</div>
+        <div class="flow-line"></div>
+      </div>
+      <div>
+        <div class="flow-content">
+          <h4>🔍 Arduino يفك الحزمة</h4>
+          <p>الـ Arduino يقرأ الحزمة ويقسمها لـ 4 أجزاء باستخدام sscanf. لو الصيغة غلط، يرد بـ MALFORMED.</p>
+          <div class="flow-packet">
+<span class="pk-dim">sscanf(packet, </span><span class="pk-green">"%s|%d|%d|%s"</span><span class="pk-dim">, cmd, seq, nonce, hmac)</span><br>
+<span class="pk-dim">cmd   = </span><span class="pk-green">"LED_ON"</span><br>
+<span class="pk-dim">seq   = </span><span class="pk-amber">6</span><br>
+<span class="pk-dim">nonce = </span><span class="pk-blue">839201</span><br>
+<span class="pk-dim">hmac  = </span><span class="pk-amber">A3F9B2C1</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-step" data-delay="300">
+      <div class="flow-num">
+        <div class="flow-circle">4</div>
+        <div class="flow-line"></div>
+      </div>
+      <div>
+        <div class="flow-content">
+          <h4>✅ فحص HMAC (طبقة 1)</h4>
+          <p>Arduino يحسب HMAC من المفتاح السري بتاعه ويقارنه بالـ HMAC اللي جاي. لو مختلف = مفتاح غلط أو تعديل في الأمر.</p>
+          <div class="flow-packet">
+<span class="pk-dim">expected = HMAC(</span><span class="pk-green">"LED_ON|6|839201"</span><span class="pk-dim">, </span><span class="pk-amber">"MySecretKey123"</span><span class="pk-dim">)</span><br>
+<span class="pk-dim">received = </span><span class="pk-amber">A3F9B2C1</span><br>
+<span class="pk-green">expected == received → PASS ✓</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-step" data-delay="400">
+      <div class="flow-num">
+        <div class="flow-circle">5</div>
+        <div class="flow-line"></div>
+      </div>
+      <div>
+        <div class="flow-content">
+          <h4>✅ فحص Sequence (طبقة 2)</h4>
+          <p>Arduino يتحقق إن رقم الـ Sequence أكبر من آخر رقم شافه. ده بيمنع إعادة الأوامر القديمة.</p>
+          <div class="flow-packet">
+<span class="pk-dim">lastSeq  = </span><span class="pk-amber">5</span><br>
+<span class="pk-dim">incoming = </span><span class="pk-green">6</span><br>
+<span class="pk-green">6 > 5 → PASS ✓</span><br>
+<span class="pk-dim">lastSeq = 6  ← update</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-step" data-delay="500">
+      <div class="flow-num">
+        <div class="flow-circle">6</div>
+        <div class="flow-line"></div>
+      </div>
+      <div>
+        <div class="flow-content">
+          <h4>✅ فحص Nonce (طبقة 3)</h4>
+          <p>Arduino يتحقق إن الـ Nonce مش موجود في كاش الـ 20 nonce الأخيرة. لو موجود = Replay Attack.</p>
+          <div class="flow-packet">
+<span class="pk-dim">nonce_cache = [</span><span class="pk-amber">112233, 445566, 778899</span><span class="pk-dim">...]</span><br>
+<span class="pk-blue">839201</span> <span class="pk-dim">not in cache →</span> <span class="pk-green">PASS ✓</span><br>
+<span class="pk-dim">cache.add(</span><span class="pk-blue">839201</span><span class="pk-dim">)  ← store</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-step" data-delay="600">
+      <div class="flow-num">
+        <div class="flow-circle" style="border-color:var(--green); background:rgba(0,255,136,0.1);">✓</div>
+      </div>
+      <div>
+        <div class="flow-content" style="border-color: var(--green); background: rgba(0,255,136,0.05);">
+          <h4 style="color:var(--green);">🟢 تنفيذ الأمر + LED يضيء</h4>
+          <p>كل الـ 3 فحوصات نجحت. Arduino ينفذ الأمر، يشغّل الـ LED، ويرد بـ OK.</p>
+          <div class="flow-packet">
+<span class="pk-green">digitalWrite(LED_PIN, HIGH)  ← LED ON</span><br>
+<span class="pk-green">udp.write("OK:LED_ON")  ← reply</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ============ SIMULATOR ============ -->
+<section id="simulator">
+  <p class="section-label">محاكاة تفاعلية</p>
+  <h2 class="section-title">جرّب الهجمات</h2>
+  <p class="section-desc">اضغط على أي زر وشوف كيف يرد الـ Arduino على كل نوع من الهجمات بالـ Log الحي.</p>
+
+  <div class="simulator">
+    <div class="sim-header">
+      <div class="sim-dot red"></div>
+      <div class="sim-dot amber"></div>
+      <div class="sim-dot green"></div>
+      <div class="sim-title">PROJECT 108 — Live Protocol Simulator</div>
+    </div>
+    <div class="sim-body">
+      <!-- Controls panel -->
+      <div class="sim-panel">
+        <div class="sim-panel-title">Control Panel</div>
+
+        <button class="attack-btn btn-green" onclick="runAttack('legit')">
+          <span class="btn-icon">📤</span>
+          <div>
+            <div style="font-size:14px;">أمر شرعي (LED_ON)</div>
+            <div style="font-size:11px; opacity:0.6; margin-top:2px; font-family:var(--mono);">HMAC صح + SEQ صح + NONCE جديد</div>
+          </div>
+        </button>
+
+        <button class="attack-btn btn-red" onclick="runAttack('wrong_key')">
+          <span class="btn-icon">🔑</span>
+          <div>
+            <div style="font-size:14px;">هجوم: مفتاح خاطئ</div>
+            <div style="font-size:11px; opacity:0.6; margin-top:2px; font-family:var(--mono);">WrongKey999 بدل المفتاح الحقيقي</div>
+          </div>
+        </button>
+
+        <button class="attack-btn btn-amber" onclick="runAttack('tamper')">
+          <span class="btn-icon">✏️</span>
+          <div>
+            <div style="font-size:14px;">هجوم: تعديل الأمر</div>
+            <div style="font-size:11px; opacity:0.6; margin-top:2px; font-family:var(--mono);">HMAC صح بس الأمر اتعدّل</div>
+          </div>
+        </button>
+
+        <button class="attack-btn btn-blue" onclick="runAttack('replay')">
+          <span class="btn-icon">🔄</span>
+          <div>
+            <div style="font-size:14px;">هجوم: Replay Attack</div>
+            <div style="font-size:11px; opacity:0.6; margin-top:2px; font-family:var(--mono);">نفس الحزمة القديمة تاني مرة</div>
+          </div>
+        </button>
+
+        <button class="attack-btn" style="border-color:var(--text-dim); color:var(--text-dim); margin-top:10px;" onclick="clearLog()">
+          <span class="btn-icon">🗑️</span>
+          <div>مسح اللوج</div>
+        </button>
+
+        <!-- Stats -->
+        <div class="stats-row">
+          <div class="stat-box">
+            <div class="stat-num green" id="statAccepted">0</div>
+            <div class="stat-label">مقبول</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-num red" id="statRejected">0</div>
+            <div class="stat-label">مرفوض</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-num amber" id="statTotal">0</div>
+            <div class="stat-label">إجمالي</div>
+          </div>
+        </div>
+
+        <!-- LED -->
+        <div class="led-display">
+          <div class="led-bulb" id="ledBulb"></div>
+          <div class="led-label">LED STATUS</div>
+          <div class="led-status" id="ledStatus" style="color:var(--text-dim);">STANDBY</div>
+        </div>
+      </div>
+
+      <!-- Log panel -->
+      <div class="sim-panel">
+        <div class="sim-panel-title">Arduino Serial Monitor</div>
+        <div class="sim-log" id="simLog">
+          <div class="log-line">
+            <span class="log-time">00:00.000</span>
+            <span class="log-info">Arduino ready on 192.168.1.177:8888</span>
+          </div>
+          <div class="log-line">
+            <span class="log-time">00:00.001</span>
+            <span class="log-dim">Waiting for commands...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ============ WIRING ============ -->
+<section id="wiring">
+  <p class="section-label">التوصيل الفيزيائي</p>
+  <h2 class="section-title">Hardware Setup</h2>
+  <p class="section-desc">توصيل الـ W5500 Ethernet Shield مع الـ Arduino Uno عبر SPI وتوصيل الـ LED.</p>
+
+  <div class="wiring-grid">
+    <div class="wiring-card">
+      <div class="wiring-card-header">⚡ SPI Connection — Arduino → W5500</div>
+      <table class="pin-table">
+        <tr>
+          <td class="pin-num">Pin 13</td>
+          <td class="pin-name">SCK</td>
+          <td><span class="pin-arrow">→</span></td>
+          <td class="pin-target">SCK (W5500)</td>
+        </tr>
+        <tr>
+          <td class="pin-num">Pin 12</td>
+          <td class="pin-name">MISO</td>
+          <td><span class="pin-arrow">→</span></td>
+          <td class="pin-target">MISO (W5500)</td>
+        </tr>
+        <tr>
+          <td class="pin-num">Pin 11</td>
+          <td class="pin-name">MOSI</td>
+          <td><span class="pin-arrow">→</span></td>
+          <td class="pin-target">MOSI (W5500)</td>
+        </tr>
+        <tr>
+          <td class="pin-num">Pin 10</td>
+          <td class="pin-name">SS / CS</td>
+          <td><span class="pin-arrow">→</span></td>
+          <td class="pin-target">SCS (W5500)</td>
+        </tr>
+        <tr>
+          <td class="pin-num">5V</td>
+          <td class="pin-name">Power</td>
+          <td><span class="pin-arrow">→</span></td>
+          <td class="pin-target">VCC (W5500)</td>
+        </tr>
+        <tr>
+          <td class="pin-num">GND</td>
+          <td class="pin-name">Ground</td>
+          <td><span class="pin-arrow">→</span></td>
+          <td class="pin-target">GND (W5500)</td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="wiring-card">
+      <div class="wiring-card-header">💡 LED Circuit + Network</div>
+      <table class="pin-table">
+        <tr>
+          <td class="pin-num">Pin 7</td>
+          <td class="pin-name">LED Output</td>
+          <td><span class="pin-arrow">→</span></td>
+          <td class="pin-target">220Ω → LED → GND</td>
+        </tr>
+        <tr>
+          <td class="pin-num">RJ45</td>
+          <td class="pin-name">Ethernet</td>
+          <td><span class="pin-arrow">→</span></td>
+          <td class="pin-target">Router / Switch</td>
+        </tr>
+        <tr>
+          <td class="pin-num">PC</td>
+          <td class="pin-name">Same Network</td>
+          <td><span class="pin-arrow">→</span></td>
+          <td class="pin-target">192.168.1.x</td>
+        </tr>
+        <tr>
+          <td class="pin-num">Arduino</td>
+          <td class="pin-name">Static IP</td>
+          <td><span class="pin-arrow">→</span></td>
+          <td class="pin-target">192.168.1.177</td>
+        </tr>
+        <tr>
+          <td class="pin-num">Port</td>
+          <td class="pin-name">UDP Listen</td>
+          <td><span class="pin-arrow">→</span></td>
+          <td class="pin-target">8888</td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="wiring-card" style="grid-column: 1 / -1;">
+      <div class="wiring-card-header">📦 المكتبات المطلوبة في Arduino IDE</div>
+      <div style="padding: 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap: 16px;">
+        <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 16px;">
+          <div style="font-family:var(--mono); font-size:13px; color:var(--green); margin-bottom:6px;">SPI.h</div>
+          <div style="font-size:12px; color:var(--text-dim);">بتيجي مع Arduino IDE — لا تحتاج تنزيلها</div>
+        </div>
+        <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 16px;">
+          <div style="font-family:var(--mono); font-size:13px; color:var(--green); margin-bottom:6px;">Ethernet.h</div>
+          <div style="font-size:12px; color:var(--text-dim);">Sketch → Include Library → Manage Libraries → "Ethernet"</div>
+        </div>
+        <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 16px;">
+          <div style="font-family:var(--mono); font-size:13px; color:var(--green); margin-bottom:6px;">EthernetUdp.h</div>
+          <div style="font-size:12px; color:var(--text-dim);">جزء من مكتبة Ethernet — بتيجي معاها تلقائياً</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ============ CODE ============ -->
+<section id="code">
+  <p class="section-label">الكود الكامل</p>
+  <h2 class="section-title">Implementation</h2>
+  <p class="section-desc">كود الـ Arduino وكود Python مع شرح كل جزء.</p>
+
+  <div class="simulator">
+    <div class="sim-header">
+      <div class="sim-dot red"></div>
+      <div class="sim-dot amber"></div>
+      <div class="sim-dot green"></div>
+      <div class="code-tabs" style="background:none; border:none; flex:1; margin:0; padding:0;">
+        <button class="code-tab active" onclick="switchTab('arduino', this)">Arduino.ino</button>
+        <button class="code-tab" onclick="switchTab('python', this)">client.py</button>
+        <button class="code-tab" onclick="switchTab('attacks', this)">attacks.py</button>
+      </div>
+    </div>
+
+    <!-- Arduino Code -->
+    <div class="code-content active" id="tab-arduino">
+<pre><span class="cm">// Project 108: Command Authentication + Replay Protection</span>
+<span class="cm">// Arduino Uno + W5500 Ethernet</span>
+
+<span class="kw">#include</span> <span class="str">&lt;SPI.h&gt;</span>
+<span class="kw">#include</span> <span class="str">&lt;Ethernet.h&gt;</span>
+<span class="kw">#include</span> <span class="str">&lt;EthernetUdp.h&gt;</span>
+
+<span class="cm">// ====== Network Config ======</span>
+<span class="type">byte</span> <span class="var">mac</span>[] = { <span class="num">0xDE</span>, <span class="num">0xAD</span>, <span class="num">0xBE</span>, <span class="num">0xEF</span>, <span class="num">0xFE</span>, <span class="num">0xED</span> };
+<span class="type">IPAddress</span> <span class="var">ip</span>(<span class="num">192</span>, <span class="num">168</span>, <span class="num">1</span>, <span class="num">177</span>);
+<span class="type">unsigned int</span> <span class="var">localPort</span> = <span class="num">8888</span>;
+
+<span class="cm">// ====== Shared Secret Key ======</span>
+<span class="kw">const</span> <span class="type">char</span> <span class="var">SECRET_KEY</span>[] = <span class="str">"MySecretKey123"</span>;
+
+<span class="cm">// ====== Protocol State ======</span>
+<span class="type">uint32_t</span> <span class="var">lastSeq</span> = <span class="num">0</span>;
+<span class="type">uint32_t</span> <span class="var">usedNonces</span>[<span class="num">20</span>];
+<span class="type">int</span> <span class="var">nonceIndex</span> = <span class="num">0</span>;
+<span class="kw">const</span> <span class="type">int</span> <span class="var">LED_PIN</span> = <span class="num">7</span>;
+
+<span class="type">EthernetUDP</span> <span class="var">udp</span>;
+<span class="type">char</span> <span class="var">packetBuffer</span>[<span class="num">256</span>];
+
+<span class="cm">// ====== XOR-HMAC (educational) ======</span>
+<span class="type">uint32_t</span> <span class="fn">computeHMAC</span>(<span class="kw">const</span> <span class="type">char</span>* <span class="var">msg</span>, <span class="kw">const</span> <span class="type">char</span>* <span class="var">key</span>) {
+  <span class="type">uint32_t</span> <span class="var">hash</span> = <span class="num">0x12345678</span>;
+  <span class="type">int</span> <span class="var">klen</span> = <span class="fn">strlen</span>(<span class="var">key</span>);
+  <span class="type">int</span> <span class="var">mlen</span> = <span class="fn">strlen</span>(<span class="var">msg</span>);
+  <span class="kw">for</span> (<span class="type">int</span> <span class="var">i</span> = <span class="num">0</span>; <span class="var">i</span> &lt; <span class="var">mlen</span>; <span class="var">i</span>++) {
+    <span class="var">hash</span> ^= (<span class="type">uint32_t</span>)<span class="var">msg</span>[<span class="var">i</span>] &lt;&lt; (<span class="var">i</span> % <span class="num">24</span>);
+    <span class="var">hash</span> += (<span class="type">uint32_t</span>)<span class="var">key</span>[<span class="var">i</span> % <span class="var">klen</span>] * <span class="num">31</span>;
+    <span class="var">hash</span> = (<span class="var">hash</span> &lt;&lt; <span class="num">5</span>) | (<span class="var">hash</span> &gt;&gt; <span class="num">27</span>);
+  }
+  <span class="kw">return</span> <span class="var">hash</span>;
+}
+
+<span class="type">bool</span> <span class="fn">isNonceUsed</span>(<span class="type">uint32_t</span> <span class="var">nonce</span>) {
+  <span class="kw">for</span> (<span class="type">int</span> <span class="var">i</span> = <span class="num">0</span>; <span class="var">i</span> &lt; <span class="num">20</span>; <span class="var">i</span>++)
+    <span class="kw">if</span> (<span class="var">usedNonces</span>[<span class="var">i</span>] == <span class="var">nonce</span>) <span class="kw">return</span> <span class="kw">true</span>;
+  <span class="kw">return</span> <span class="kw">false</span>;
+}
+
+<span class="type">void</span> <span class="fn">storeNonce</span>(<span class="type">uint32_t</span> <span class="var">nonce</span>) {
+  <span class="var">usedNonces</span>[<span class="var">nonceIndex</span> % <span class="num">20</span>] = <span class="var">nonce</span>;
+  <span class="var">nonceIndex</span>++;
+}
+
+<span class="type">void</span> <span class="fn">setup</span>() {
+  <span class="fn">Serial.begin</span>(<span class="num">9600</span>);
+  <span class="fn">pinMode</span>(<span class="var">LED_PIN</span>, OUTPUT);
+  <span class="fn">Ethernet.begin</span>(<span class="var">mac</span>, <span class="var">ip</span>);
+  <span class="var">udp</span>.<span class="fn">begin</span>(<span class="var">localPort</span>);
+  <span class="fn">memset</span>(<span class="var">usedNonces</span>, <span class="num">0</span>, <span class="kw">sizeof</span>(<span class="var">usedNonces</span>));
+}
+
+<span class="type">void</span> <span class="fn">loop</span>() {
+  <span class="type">int</span> <span class="var">pSize</span> = <span class="var">udp</span>.<span class="fn">parsePacket</span>();
+  <span class="kw">if</span> (!<span class="var">pSize</span>) <span class="kw">return</span>;
+  <span class="var">udp</span>.<span class="fn">read</span>(<span class="var">packetBuffer</span>, <span class="kw">sizeof</span>(<span class="var">packetBuffer</span>));
+  <span class="var">packetBuffer</span>[<span class="var">pSize</span>] = <span class="str">'\0'</span>;
+
+  <span class="type">char</span> <span class="var">cmd</span>[<span class="num">32</span>], <span class="var">seqStr</span>[<span class="num">16</span>], <span class="var">nonceStr</span>[<span class="num">16</span>], <span class="var">hmacStr</span>[<span class="num">16</span>];
+  <span class="kw">if</span> (<span class="fn">sscanf</span>(<span class="var">packetBuffer</span>, <span class="str">"%31[^|]|%15[^|]|%15[^|]|%15s"</span>,
+             <span class="var">cmd</span>, <span class="var">seqStr</span>, <span class="var">nonceStr</span>, <span class="var">hmacStr</span>) != <span class="num">4</span>) {
+    <span class="fn">sendReply</span>(<span class="str">"ERROR:MALFORMED"</span>); <span class="kw">return</span>;
+  }
+
+  <span class="type">uint32_t</span> <span class="var">seq</span>      = (<span class="type">uint32_t</span>)<span class="fn">atol</span>(<span class="var">seqStr</span>);
+  <span class="type">uint32_t</span> <span class="var">nonce</span>    = (<span class="type">uint32_t</span>)<span class="fn">atol</span>(<span class="var">nonceStr</span>);
+  <span class="type">uint32_t</span> <span class="var">rcvHmac</span>  = (<span class="type">uint32_t</span>)<span class="fn">strtoul</span>(<span class="var">hmacStr</span>, <span class="kw">NULL</span>, <span class="num">16</span>);
+
+  <span class="cm">// Check 1: HMAC</span>
+  <span class="type">char</span> <span class="var">msgToSign</span>[<span class="num">128</span>];
+  <span class="fn">snprintf</span>(<span class="var">msgToSign</span>, <span class="kw">sizeof</span>(<span class="var">msgToSign</span>), <span class="str">"%s|%lu|%lu"</span>, <span class="var">cmd</span>, <span class="var">seq</span>, <span class="var">nonce</span>);
+  <span class="kw">if</span> (<span class="fn">computeHMAC</span>(<span class="var">msgToSign</span>, <span class="var">SECRET_KEY</span>) != <span class="var">rcvHmac</span>) {
+    <span class="fn">sendReply</span>(<span class="str">"ERROR:BAD_HMAC"</span>); <span class="kw">return</span>;
+  }
+
+  <span class="cm">// Check 2: Sequence</span>
+  <span class="kw">if</span> (<span class="var">seq</span> &lt;= <span class="var">lastSeq</span>) {
+    <span class="fn">sendReply</span>(<span class="str">"ERROR:OLD_SEQ"</span>); <span class="kw">return</span>;
+  }
+
+  <span class="cm">// Check 3: Nonce</span>
+  <span class="kw">if</span> (<span class="fn">isNonceUsed</span>(<span class="var">nonce</span>)) {
+    <span class="fn">sendReply</span>(<span class="str">"ERROR:REPLAY"</span>); <span class="kw">return</span>;
+  }
+
+  <span class="cm">// All checks passed!</span>
+  <span class="var">lastSeq</span> = <span class="var">seq</span>;
+  <span class="fn">storeNonce</span>(<span class="var">nonce</span>);
+
+  <span class="kw">if</span> (<span class="fn">strcmp</span>(<span class="var">cmd</span>, <span class="str">"LED_ON"</span>) == <span class="num">0</span>) {
+    <span class="fn">digitalWrite</span>(<span class="var">LED_PIN</span>, HIGH);
+    <span class="fn">sendReply</span>(<span class="str">"OK:LED_ON"</span>);
+  } <span class="kw">else if</span> (<span class="fn">strcmp</span>(<span class="var">cmd</span>, <span class="str">"LED_OFF"</span>) == <span class="num">0</span>) {
+    <span class="fn">digitalWrite</span>(<span class="var">LED_PIN</span>, LOW);
+    <span class="fn">sendReply</span>(<span class="str">"OK:LED_OFF"</span>);
+  }
+}
+
+<span class="type">void</span> <span class="fn">sendReply</span>(<span class="kw">const</span> <span class="type">char</span>* <span class="var">msg</span>) {
+  <span class="var">udp</span>.<span class="fn">beginPacket</span>(<span class="var">udp</span>.<span class="fn">remoteIP</span>(), <span class="var">udp</span>.<span class="fn">remotePort</span>());
+  <span class="var">udp</span>.<span class="fn">write</span>(<span class="var">msg</span>);
+  <span class="var">udp</span>.<span class="fn">endPacket</span>();
+}</pre>
+    </div>
+
+    <!-- Python Client -->
+    <div class="code-content" id="tab-python">
+<pre><span class="cm"># Project 108 — Legitimate Python Client</span>
+<span class="kw">import</span> socket, random, time
+
+<span class="var">ARDUINO_IP</span>   = <span class="str">"192.168.1.177"</span>
+<span class="var">ARDUINO_PORT</span> = <span class="num">8888</span>
+<span class="var">SECRET_KEY</span>   = <span class="str">"MySecretKey123"</span>
+
+<span class="var">sock</span> = socket.<span class="fn">socket</span>(socket.AF_INET, socket.SOCK_DGRAM)
+<span class="var">sock</span>.<span class="fn">settimeout</span>(<span class="num">2</span>)
+<span class="var">seq_counter</span> = <span class="num">0</span>
+
+<span class="kw">def</span> <span class="fn">compute_hmac</span>(msg: <span class="type">str</span>, key: <span class="type">str</span>) -&gt; <span class="type">int</span>:
+    <span class="var">h</span> = <span class="num">0x12345678</span>
+    <span class="kw">for</span> <span class="var">i</span>, <span class="var">ch</span> <span class="kw">in</span> <span class="fn">enumerate</span>(msg):
+        <span class="var">h</span> ^= <span class="fn">ord</span>(<span class="var">ch</span>) &lt;&lt; (<span class="var">i</span> % <span class="num">24</span>)
+        <span class="var">h</span> += <span class="fn">ord</span>(<span class="var">key</span>[<span class="var">i</span> % <span class="fn">len</span>(<span class="var">key</span>)]) * <span class="num">31</span>
+        <span class="var">h</span> = ((<span class="var">h</span> &lt;&lt; <span class="num">5</span>) | (<span class="var">h</span> &gt;&gt; <span class="num">27</span>)) &amp; <span class="num">0xFFFFFFFF</span>
+    <span class="kw">return</span> <span class="var">h</span>
+
+<span class="kw">def</span> <span class="fn">build_packet</span>(cmd, key=<span class="var">SECRET_KEY</span>, seq=<span class="kw">None</span>, nonce=<span class="kw">None</span>):
+    <span class="kw">global</span> <span class="var">seq_counter</span>
+    <span class="kw">if</span> seq <span class="kw">is None</span>:
+        <span class="var">seq_counter</span> += <span class="num">1</span>
+        <span class="var">seq</span> = <span class="var">seq_counter</span>
+    <span class="kw">if</span> nonce <span class="kw">is None</span>:
+        <span class="var">nonce</span> = random.<span class="fn">randint</span>(<span class="num">100000</span>, <span class="num">999999</span>)
+    <span class="var">msg</span> = <span class="str">f"</span>{cmd}|{seq}|{nonce}<span class="str">"</span>
+    <span class="var">hmac</span> = <span class="fn">compute_hmac</span>(<span class="var">msg</span>, <span class="var">key</span>)
+    <span class="kw">return</span> <span class="str">f"</span>{msg}|{hmac:<span class="num">08X</span>}<span class="str">"</span>, seq, nonce
+
+<span class="kw">def</span> <span class="fn">send_cmd</span>(cmd):
+    <span class="var">pkt</span>, _, _ = <span class="fn">build_packet</span>(cmd)
+    <span class="fn">print</span>(<span class="str">f"→ {pkt}"</span>)
+    <span class="var">sock</span>.<span class="fn">sendto</span>(<span class="var">pkt</span>.<span class="fn">encode</span>(), (<span class="var">ARDUINO_IP</span>, <span class="var">ARDUINO_PORT</span>))
+    <span class="kw">try</span>:
+        <span class="var">data</span>, _ = <span class="var">sock</span>.<span class="fn">recvfrom</span>(<span class="num">256</span>)
+        <span class="fn">print</span>(<span class="str">f"← {data.decode()}"</span>)
+    <span class="kw">except</span> socket.timeout:
+        <span class="fn">print</span>(<span class="str">"← timeout"</span>)
+
+<span class="cm"># Send legitimate commands</span>
+<span class="fn">send_cmd</span>(<span class="str">"LED_ON"</span>)
+time.<span class="fn">sleep</span>(<span class="num">1</span>)
+<span class="fn">send_cmd</span>(<span class="str">"LED_OFF"</span>)</pre>
+    </div>
+
+    <!-- Attacks Code -->
+    <div class="code-content" id="tab-attacks">
+<pre><span class="cm"># Project 108 — Attack Scripts</span>
+
+<span class="cm"># ==========================================</span>
+<span class="cm"># ATTACK 1: Wrong Key</span>
+<span class="cm"># ==========================================</span>
+<span class="kw">def</span> <span class="fn">attack_wrong_key</span>():
+    <span class="fn">print</span>(<span class="str">"ATTACK 1: Wrong Key"</span>)
+    <span class="kw">for</span> _ <span class="kw">in</span> <span class="fn">range</span>(<span class="num">5</span>):
+        <span class="cm"># Use wrong key → HMAC will be different</span>
+        pkt, _, _ = <span class="fn">build_packet</span>(<span class="str">"LED_ON"</span>, key=<span class="str">"WrongKey999"</span>)
+        <span class="var">sock</span>.<span class="fn">sendto</span>(pkt.<span class="fn">encode</span>(), (<span class="var">ARDUINO_IP</span>, <span class="var">ARDUINO_PORT</span>))
+        <span class="cm"># Expected reply: ERROR:BAD_HMAC</span>
+
+<span class="cm"># ==========================================</span>
+<span class="cm"># ATTACK 2: Packet Tampering</span>
+<span class="cm"># ==========================================</span>
+<span class="kw">def</span> <span class="fn">attack_tamper</span>():
+    <span class="fn">print</span>(<span class="str">"ATTACK 2: Tamper"</span>)
+    <span class="cm"># Build legit packet for LED_OFF</span>
+    pkt, _, _ = <span class="fn">build_packet</span>(<span class="str">"LED_OFF"</span>)
+    <span class="cm"># Change command AFTER HMAC was computed</span>
+    tampered = pkt.<span class="fn">replace</span>(<span class="str">"LED_OFF"</span>, <span class="str">"LED_ON"</span>, <span class="num">1</span>)
+    <span class="var">sock</span>.<span class="fn">sendto</span>(tampered.<span class="fn">encode</span>(), (<span class="var">ARDUINO_IP</span>, <span class="var">ARDUINO_PORT</span>))
+    <span class="cm"># HMAC was for LED_OFF, Arduino recalcs for LED_ON → mismatch</span>
+    <span class="cm"># Expected reply: ERROR:BAD_HMAC</span>
+
+<span class="cm"># ==========================================</span>
+<span class="cm"># ATTACK 3: Replay Attack</span>
+<span class="cm"># ==========================================</span>
+<span class="kw">def</span> <span class="fn">attack_replay</span>():
+    <span class="fn">print</span>(<span class="str">"ATTACK 3: Replay"</span>)
+    <span class="cm"># Send one legit packet</span>
+    pkt, _, _ = <span class="fn">build_packet</span>(<span class="str">"LED_ON"</span>)
+    <span class="var">sock</span>.<span class="fn">sendto</span>(pkt.<span class="fn">encode</span>(), ...)  <span class="cm"># → OK:LED_ON (first time)</span>
+
+    <span class="cm"># Now replay the SAME packet multiple times</span>
+    <span class="kw">for</span> _ <span class="kw">in</span> <span class="fn">range</span>(<span class="num">5</span>):
+        <span class="var">sock</span>.<span class="fn">sendto</span>(pkt.<span class="fn">encode</span>(), ...)
+        <span class="cm"># seq is same → ERROR:OLD_SEQ</span>
+        <span class="cm"># nonce is same → ERROR:REPLAY</span>
+
+<span class="cm"># ==========================================</span>
+<span class="cm"># Run all and print matrix</span>
+<span class="cm"># ==========================================</span>
+<span class="kw">if</span> __name__ == <span class="str">"__main__"</span>:
+    r1 = <span class="fn">attack_wrong_key</span>()    <span class="cm"># Accepted:0 Rejected:5</span>
+    r2 = <span class="fn">attack_tamper</span>()       <span class="cm"># Accepted:0 Rejected:5</span>
+    r3 = <span class="fn">attack_replay</span>()       <span class="cm"># Accepted:0 Rejected:5</span>
+    r4 = <span class="fn">legitimate_commands</span>() <span class="cm"># Accepted:5 Rejected:0</span>
+
+    <span class="fn">print</span>(<span class="str">f"{'Attack':&lt;25} {'Accept':&gt;8} {'Reject':&gt;8}"</span>)
+    <span class="fn">print</span>(<span class="str">f"{'Wrong Key':&lt;25} {<span class="num">0</span>:&gt;8} {<span class="num">5</span>:&gt;8}"</span>)
+    <span class="fn">print</span>(<span class="str">f"{'Tampering':&lt;25} {<span class="num">0</span>:&gt;8} {<span class="num">5</span>:&gt;8}"</span>)
+    <span class="fn">print</span>(<span class="str">f"{'Replay':&lt;25} {<span class="num">0</span>:&gt;8} {<span class="num">5</span>:&gt;8}"</span>)
+    <span class="fn">print</span>(<span class="str">f"{'Legitimate':&lt;25} {<span class="num">5</span>:&gt;8} {<span class="num">0</span>:&gt;8}"</span>)</pre>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ============ WIRESHARK ============ -->
+<section id="wireshark">
+  <p class="section-label">تحليل الحزم</p>
+  <h2 class="section-title">Wireshark Captures</h2>
+  <p class="section-desc">كيف تبدو الحزم في Wireshark وكيف تفسّر كل نوع. فلتر: <span style="font-family:var(--mono); color:var(--green);">udp.port == 8888</span></p>
+
+  <div class="wireshark-sim">
+    <div class="ws-toolbar">
+      <div class="ws-toolbar-title">WIRESHARK — LIVE CAPTURE</div>
+      <input class="ws-filter" value="udp.port == 8888" readonly>
+    </div>
+
+    <div class="ws-packets" id="wsPackets">
+      <div class="ws-packet-row ok" onclick="selectPacket(this, 0)">
+        <span class="ws-col num">1</span>
+        <span class="ws-col time">0.000000</span>
+        <span class="ws-col src">192.168.1.100</span>
+        <span class="ws-col dst">192.168.1.177</span>
+        <span class="ws-col proto">UDP</span>
+        <span class="ws-col len">62</span>
+        <span class="ws-col info ok">LED_ON|1|839201|A3F9B2C1 → OK:LED_ON</span>
+      </div>
+      <div class="ws-packet-row err" onclick="selectPacket(this, 1)">
+        <span class="ws-col num">2</span>
+        <span class="ws-col time">1.023441</span>
+        <span class="ws-col src">192.168.1.100</span>
+        <span class="ws-col dst">192.168.1.177</span>
+        <span class="ws-col proto">UDP</span>
+        <span class="ws-col len">62</span>
+        <span class="ws-col info err">LED_ON|2|445522|DEADBEEF → ERROR:BAD_HMAC</span>
+      </div>
+      <div class="ws-packet-row err" onclick="selectPacket(this, 2)">
+        <span class="ws-col num">3</span>
+        <span class="ws-col time">2.051200</span>
+        <span class="ws-col src">192.168.1.100</span>
+        <span class="ws-col dst">192.168.1.177</span>
+        <span class="ws-col proto">UDP</span>
+        <span class="ws-col len">62</span>
+        <span class="ws-col info err">LED_ON|1|839201|A3F9B2C1 → ERROR:REPLAY</span>
+      </div>
+      <div class="ws-packet-row ok" onclick="selectPacket(this, 3)">
+        <span class="ws-col num">4</span>
+        <span class="ws-col time">3.100000</span>
+        <span class="ws-col src">192.168.1.100</span>
+        <span class="ws-col dst">192.168.1.177</span>
+        <span class="ws-col proto">UDP</span>
+        <span class="ws-col len">64</span>
+        <span class="ws-col info ok">LED_OFF|3|991234|F1A2B3C4 → OK:LED_OFF</span>
+      </div>
+      <div class="ws-packet-row warn" onclick="selectPacket(this, 4)">
+        <span class="ws-col num">5</span>
+        <span class="ws-col time">4.200000</span>
+        <span class="ws-col src">192.168.1.100</span>
+        <span class="ws-col dst">192.168.1.177</span>
+        <span class="ws-col proto">UDP</span>
+        <span class="ws-col len">62</span>
+        <span class="ws-col info err">LED_ON|2|112233|A3F9B2C1 → ERROR:OLD_SEQ</span>
+      </div>
+    </div>
+
+    <div class="ws-detail" id="wsDetail">
+      <span style="color:rgba(255,255,255,0.3); font-size:11px;">اضغط على أي صف لرؤية تفاصيل الحزمة...</span>
+    </div>
+  </div>
+
+  <!-- Attack matrix -->
+  <div style="margin-top: 40px;">
+    <h3 style="font-size:20px; font-weight:700; margin-bottom:20px;">Attack Demo Matrix</h3>
+    <div style="overflow-x:auto;">
+      <table class="attack-matrix" id="attackMatrix">
+        <thead>
+          <tr>
+            <th>الهجوم</th>
+            <th>الأوامر المرسلة</th>
+            <th>مقبولة</th>
+            <th>مرفوضة</th>
+            <th>السبب</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span style="color:var(--red);">مفتاح خاطئ</span></td>
+            <td><span style="font-family:var(--mono);">5</span></td>
+            <td><span class="pill rejected">0</span></td>
+            <td><span class="pill accepted">5</span></td>
+            <td><span style="font-family:var(--mono); font-size:12px; color:var(--text-dim);">HMAC mismatch</span></td>
+          </tr>
+          <tr>
+            <td><span style="color:var(--amber);">تعديل الأمر</span></td>
+            <td><span style="font-family:var(--mono);">5</span></td>
+            <td><span class="pill rejected">0</span></td>
+            <td><span class="pill accepted">5</span></td>
+            <td><span style="font-family:var(--mono); font-size:12px; color:var(--text-dim);">BAD_HMAC</span></td>
+          </tr>
+          <tr>
+            <td><span style="color:var(--blue);">Replay Attack</span></td>
+            <td><span style="font-family:var(--mono);">5</span></td>
+            <td><span class="pill rejected">0</span></td>
+            <td><span class="pill accepted">5</span></td>
+            <td><span style="font-family:var(--mono); font-size:12px; color:var(--text-dim);">OLD_SEQ + REPLAY</span></td>
+          </tr>
+          <tr style="border-top: 1px solid var(--green);">
+            <td><span style="color:var(--green);">أوامر شرعية ✓</span></td>
+            <td><span style="font-family:var(--mono);">5</span></td>
+            <td><span class="pill accepted">5</span></td>
+            <td><span class="pill rejected">0</span></td>
+            <td><span style="font-family:var(--mono); font-size:12px; color:var(--text-dim);">All checks pass</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<footer>
+  <div>PROJECT <span class="green">108</span> // CSC2204 // COMPUTER NETWORKS 2025/2026</div>
+  <div style="margin-top:8px; color:rgba(255,255,255,0.2);">Egyptian Chinese University — Faculty of Computer Science</div>
+</footer>
+
+<script>
+// ============ CURSOR ============
+const cursor = document.getElementById('cursor');
+const ring = document.getElementById('cursor-ring');
+let mx = -100, my = -100, rx = -100, ry = -100;
+
+document.addEventListener('mousemove', e => {
+  mx = e.clientX; my = e.clientY;
+  cursor.style.left = mx + 'px';
+  cursor.style.top = my + 'px';
+});
+
+setInterval(() => {
+  rx += (mx - rx) * 0.15;
+  ry += (my - ry) * 0.15;
+  ring.style.left = rx + 'px';
+  ring.style.top = ry + 'px';
+}, 16);
+
+document.querySelectorAll('button, a, .concept-card, .wiring-card, .ws-packet-row, .flow-step').forEach(el => {
+  el.addEventListener('mouseenter', () => { cursor.classList.add('hover'); ring.classList.add('hover'); });
+  el.addEventListener('mouseleave', () => { cursor.classList.remove('hover'); ring.classList.remove('hover'); });
+});
+
+// ============ PROGRESS BAR ============
+window.addEventListener('scroll', () => {
+  const h = document.documentElement.scrollHeight - window.innerHeight;
+  document.getElementById('progress').style.width = (window.scrollY / h * 100) + '%';
+});
+
+// ============ INTERSECTION OBSERVER ============
+const obs = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      e.target.classList.add('visible');
+    }
+  });
+}, { threshold: 0.15 });
+
+document.querySelectorAll('.section-label, .section-title, .section-desc, .concept-card, .flow-step, .wiring-card, .attack-matrix').forEach((el, i) => {
+  const delay = el.dataset.delay || 0;
+  el.style.transitionDelay = delay + 'ms';
+  obs.observe(el);
+});
+
+// ============ NAV ACTIVE ============
+const sections = document.querySelectorAll('section[id]');
+const navLinks = document.querySelectorAll('.nav a');
+
+window.addEventListener('scroll', () => {
+  let cur = '';
+  sections.forEach(s => {
+    if (window.scrollY >= s.offsetTop - 200) cur = s.id;
+  });
+  navLinks.forEach(a => {
+    a.classList.toggle('active', a.getAttribute('href') === '#' + cur);
+  });
+});
+
+// ============ SIMULATOR ============
+let seqCounter = 0;
+let lastNonce = null;
+let lastPkt = null;
+let statsA = 0, statsR = 0;
+
+const SECRET = "MySecretKey123";
+
+function xorHMAC(msg, key) {
+  let h = 0x12345678;
+  for (let i = 0; i < msg.length; i++) {
+    h ^= msg.charCodeAt(i) << (i % 24);
+    h = (h + key.charCodeAt(i % key.length) * 31) >>> 0;
+    h = ((h << 5) | (h >>> 27)) >>> 0;
+  }
+  return h;
+}
+
+function buildPacket(cmd, key, seq, nonce) {
+  if (seq === undefined) { seqCounter++; seq = seqCounter; }
+  if (nonce === undefined) nonce = Math.floor(Math.random() * 900000) + 100000;
+  const msg = `${cmd}|${seq}|${nonce}`;
+  const h = xorHMAC(msg, key || SECRET).toString(16).toUpperCase().padStart(8, '0');
+  return { pkt: `${msg}|${h}`, seq, nonce };
+}
+
+function getTime() {
+  const n = new Date();
+  return `${String(n.getMinutes()).padStart(2,'0')}:${String(n.getSeconds()).padStart(2,'0')}.${String(n.getMilliseconds()).padStart(3,'0')}`;
+}
+
+function addLog(text, cls) {
+  const log = document.getElementById('simLog');
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  line.innerHTML = `<span class="log-time">${getTime()}</span><span class="${cls}">${text}</span>`;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+function setLED(state) {
+  const bulb = document.getElementById('ledBulb');
+  const status = document.getElementById('ledStatus');
+  bulb.className = 'led-bulb ' + state;
+  if (state === 'on') { status.textContent = 'ON'; status.style.color = 'var(--green)'; }
+  else if (state === 'rejected') { status.textContent = 'REJECTED'; status.style.color = 'var(--red)'; setTimeout(() => { bulb.className='led-bulb'; status.textContent='STANDBY'; status.style.color='var(--text-dim)'; }, 1200); }
+  else { status.textContent = 'OFF'; status.style.color = 'var(--text-dim)'; }
+}
+
+function updateStats(accepted) {
+  if (accepted) statsA++; else statsR++;
+  document.getElementById('statAccepted').textContent = statsA;
+  document.getElementById('statRejected').textContent = statsR;
+  document.getElementById('statTotal').textContent = statsA + statsR;
+}
+
+function animatePacket(accepted) {
+  const fp = document.getElementById('flyingPacket');
+  fp.style.left = '160px';
+  fp.style.opacity = '1';
+  fp.style.background = accepted ? 'rgba(0,255,136,0.15)' : 'rgba(255,59,92,0.15)';
+  fp.style.color = accepted ? 'var(--green)' : 'var(--red)';
+  fp.style.border = `1px solid ${accepted ? 'rgba(0,255,136,0.4)' : 'rgba(255,59,92,0.4)'}`;
+  fp.textContent = accepted ? '✓ OK' : '✗ REJECTED';
+
+  fp.style.transition = 'left 0.7s ease, opacity 0.3s';
+  setTimeout(() => { fp.style.left = 'calc(100% - 220px)'; }, 50);
+  setTimeout(() => { fp.style.opacity = '0'; fp.style.transition = 'opacity 0.4s'; }, 800);
+  setTimeout(() => { fp.style.transition = 'none'; fp.style.left = '160px'; }, 1300);
+}
+
+function runAttack(type) {
+  let pkt, label, accepted = false, reason = '';
+
+  if (type === 'legit') {
+    const b = buildPacket('LED_ON');
+    pkt = b.pkt; lastNonce = b.nonce; lastPkt = b;
+    label = 'LED_ON';
+    accepted = true;
+    reason = 'All checks PASS';
+    addLog(`→ Sending: ${pkt}`, 'log-info');
+    setTimeout(() => {
+      addLog('✓ HMAC verified', 'log-ok');
+      addLog('✓ SEQ valid (' + b.seq + ' > ' + (b.seq - 1) + ')', 'log-ok');
+      addLog('✓ NONCE is fresh', 'log-ok');
+      addLog('← OK:LED_ON', 'log-ok');
+      setLED('on');
+    }, 300);
+
+  } else if (type === 'wrong_key') {
+    const b = buildPacket('LED_ON', 'WrongKey999');
+    pkt = b.pkt;
+    label = 'Wrong Key Attack';
+    addLog(`→ Sending (wrong key): ${pkt}`, 'log-warn');
+    setTimeout(() => {
+      addLog('✗ HMAC mismatch!', 'log-err');
+      addLog('← ERROR:BAD_HMAC', 'log-err');
+      setLED('rejected');
+    }, 300);
+
+  } else if (type === 'tamper') {
+    const b = buildPacket('LED_OFF');
+    const tampered = b.pkt.replace('LED_OFF', 'LED_ON');
+    pkt = tampered;
+    label = 'Tampering Attack';
+    addLog(`→ Tampered packet: ${pkt}`, 'log-warn');
+    setTimeout(() => {
+      addLog('✗ HMAC mismatch! (msg was changed)', 'log-err');
+      addLog('← ERROR:BAD_HMAC', 'log-err');
+      setLED('rejected');
+    }, 300);
+
+  } else if (type === 'replay') {
+    if (!lastPkt) {
+      addLog('! Run a legit command first to capture a packet', 'log-warn');
+      return;
+    }
+    pkt = lastPkt.pkt;
+    label = 'Replay Attack';
+    addLog(`→ Replaying old packet: ${pkt}`, 'log-warn');
+    setTimeout(() => {
+      addLog('✓ HMAC is valid (same key)', 'log-ok');
+      addLog('✗ SEQ already seen (old_seq check)', 'log-err');
+      addLog('✗ NONCE already used!', 'log-err');
+      addLog('← ERROR:REPLAY', 'log-err');
+      setLED('rejected');
+    }, 300);
+  }
+
+  animatePacket(accepted);
+  updateStats(accepted);
+}
+
+function clearLog() {
+  const log = document.getElementById('simLog');
+  log.innerHTML = '<div class="log-line"><span class="log-time">00:00.000</span><span class="log-info">Log cleared — Arduino ready.</span></div>';
+  statsA = 0; statsR = 0; seqCounter = 0;
+  document.getElementById('statAccepted').textContent = '0';
+  document.getElementById('statRejected').textContent = '0';
+  document.getElementById('statTotal').textContent = '0';
+  setLED('');
+}
+
+// ============ CODE TABS ============
+function switchTab(name, btn) {
+  document.querySelectorAll('.code-content').forEach(c => c.classList.remove('active'));
+  document.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  btn.classList.add('active');
+}
+
+// ============ WIRESHARK ============
+const wsDetails = [
+  `<span class="ws-field">Frame:</span> 62 bytes on wire<br><span class="ws-field">Source IP:</span> <span class="ws-val">192.168.1.100</span><br><span class="ws-field">Dest IP:</span> <span class="ws-val">192.168.1.177</span><br><span class="ws-field">Protocol:</span> <span class="ws-val">UDP</span><br><span class="ws-field">Src Port:</span> <span class="ws-val">52341</span> &nbsp; <span class="ws-field">Dst Port:</span> <span class="ws-val">8888</span><br><span class="ws-field">Payload:</span> <span class="ws-val">LED_ON|1|839201|A3F9B2C1</span><br><span class="ws-field">HMAC Check:</span> <span class="ws-ok">VALID ✓</span> &nbsp; <span class="ws-field">SEQ Check:</span> <span class="ws-ok">6 > 5 ✓</span> &nbsp; <span class="ws-field">NONCE:</span> <span class="ws-ok">Fresh ✓</span><br><span class="ws-field">Arduino Reply:</span> <span class="ws-ok">OK:LED_ON</span>`,
+  `<span class="ws-field">Frame:</span> 62 bytes on wire<br><span class="ws-field">Source IP:</span> <span class="ws-val">192.168.1.100</span><br><span class="ws-field">Dest IP:</span> <span class="ws-val">192.168.1.177</span><br><span class="ws-field">Protocol:</span> <span class="ws-val">UDP</span><br><span class="ws-field">Payload:</span> <span class="ws-val">LED_ON|2|445522|DEADBEEF</span><br><span class="ws-field">HMAC Check:</span> <span class="ws-err">INVALID ✗</span> — Expected A3F9xxxx, got DEADBEEF<br><span class="ws-field">Reason:</span> <span class="ws-err">Wrong key used (WrongKey999)</span><br><span class="ws-field">Arduino Reply:</span> <span class="ws-err">ERROR:BAD_HMAC</span>`,
+  `<span class="ws-field">Frame:</span> 62 bytes on wire<br><span class="ws-field">Payload:</span> <span class="ws-val">LED_ON|1|839201|A3F9B2C1</span> ← <span class="ws-err">IDENTICAL to packet #1!</span><br><span class="ws-field">HMAC Check:</span> <span class="ws-ok">VALID ✓</span> (same key)<br><span class="ws-field">SEQ Check:</span> <span class="ws-err">FAIL ✗</span> — seq=1, lastSeq=1 (not greater)<br><span class="ws-field">NONCE Check:</span> <span class="ws-err">FAIL ✗</span> — nonce 839201 already in cache<br><span class="ws-field">Arduino Reply:</span> <span class="ws-err">ERROR:REPLAY</span>`,
+  `<span class="ws-field">Frame:</span> 64 bytes on wire<br><span class="ws-field">Payload:</span> <span class="ws-val">LED_OFF|3|991234|F1A2B3C4</span><br><span class="ws-field">HMAC Check:</span> <span class="ws-ok">VALID ✓</span><br><span class="ws-field">SEQ Check:</span> <span class="ws-ok">3 > 2 ✓</span><br><span class="ws-field">NONCE Check:</span> <span class="ws-ok">991234 not in cache ✓</span><br><span class="ws-field">Arduino Reply:</span> <span class="ws-ok">OK:LED_OFF</span>`,
+  `<span class="ws-field">Frame:</span> 62 bytes on wire<br><span class="ws-field">Payload:</span> <span class="ws-val">LED_ON|2|112233|A3F9B2C1</span><br><span class="ws-field">HMAC Check:</span> <span class="ws-ok">VALID ✓</span> (correct key)<br><span class="ws-field">SEQ Check:</span> <span class="ws-err">FAIL ✗</span> — seq=2 ≤ lastSeq=3<br><span class="ws-field">Note:</span> This could be a delayed/reordered old packet<br><span class="ws-field">Arduino Reply:</span> <span class="ws-err">ERROR:OLD_SEQ</span>`,
+];
+
+let selectedRow = null;
+
+function selectPacket(row, idx) {
+  if (selectedRow) selectedRow.classList.remove('selected');
+  row.classList.add('selected');
+  selectedRow = row;
+  document.getElementById('wsDetail').innerHTML = wsDetails[idx];
+}
+
+// Auto-animate network vis
+setInterval(() => {
+  const fp = document.getElementById('flyingPacket');
+  if (!document.getElementById('flow').getBoundingClientRect) return;
+}, 3000);
+</script>
+</body>
+</html>
